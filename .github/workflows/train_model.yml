@@ -37,7 +37,7 @@ jobs:
         run: |
           echo "## Training Summary" >> $GITHUB_STEP_SUMMARY
           echo "**Name:** Albert Sebastian" >> $GITHUB_STEP_SUMMARY
-          echo "**Roll Number: 2022BCS0007" >> $GITHUB_STEP_SUMMARY
+          echo "**Roll Number:** 2022BCS0007" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Evaluation Metrics:" >> $GITHUB_STEP_SUMMARY
           cat output/results.json >> $GITHUB_STEP_SUMMARY
