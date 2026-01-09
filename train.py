@@ -4,8 +4,8 @@ import os
 import joblib
 
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.linear_model import Lasso
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
 
 # Ensure output directory exists
@@ -19,18 +19,18 @@ target_column = "quality"
 X = data.drop(columns=[target_column])
 y = data[target_column]
 
-# Train-test split (25% test)
+# Train-test split (40% test)
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.25, random_state=42
+    X, y, test_size=0.4, random_state=42
 )
 
-# Min-Max Scaling
-scaler = MinMaxScaler()
+# Standard Scaling
+scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
 X_test_scaled = scaler.transform(X_test)
 
-# Model: Lasso Regression with alpha=0.05
-model = Lasso(alpha=0.05)
+# Model: Linear Regression
+model = LinearRegression()
 model.fit(X_train_scaled, y_train)
 
 # Predict
