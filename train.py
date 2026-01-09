@@ -40,17 +40,14 @@ mse = mean_squared_error(y_test, y_pred)
 r2 = r2_score(y_test, y_pred)
 
 
-os.makedirs("outputs/model", exist_ok=True)
-os.makedirs("outputs/metrics", exist_ok=True)
-
-joblib.dump(model, "outputs/model/linear_regression_model.pkl")
+joblib.dump(model, "output/model.pkl")
 
 metrics = {
     "mean_squared_error": mse,
     "r2_score": r2
 }
 
-with open("outputs/metrics/evaluation_metrics.json", "w") as f:
+with open("output/results.json", "w") as f:
     json.dump(metrics, f, indent=4)
 
 
