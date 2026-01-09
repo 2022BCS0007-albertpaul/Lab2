@@ -1,0 +1,54 @@
+name: Train ML Model
+
+# Step 1: Trigger workflow on push or PR to main
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# Step 2: Define the job
+jobs:
+  train:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 3: Checkout repo
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Step 4: Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      # Step 5: Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Step 6: Run training script
+      - name: Run training script
+        run: |
+          python train.py
+
+      # Step 7: Add evaluation results to GitHub Actions summary
+      - name: Add evaluation results to job summary
+        run: |
+          echo "### ML Model Training Results" >> $GITHUB_STEP_SUMMARY
+          echo "Name: Albert Paul Sebastian" >> $GITHUB_STEP_SUMMARY
+          echo "Roll Number: 2022BCS0007" >> $GITHUB_STEP_SUMMARY
+          if [ -f results.json ]; then cat results.json >> $GITHUB_STEP_SUMMARY; else echo "results.json not found"; fi
+
+      # Step 8: Upload artifacts
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: trained-model
+          path: |
+            model.pkl
+            results.json
