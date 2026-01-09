@@ -4,8 +4,7 @@ import os
 import joblib
 
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import Lasso
+from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_squared_error, r2_score
 
 # Ensure output directory exists
@@ -19,18 +18,17 @@ target_column = "quality"
 X = data.drop(columns=[target_column])
 y = data[target_column]
 
-# Train-test split (20% test)
+# Train-test split (30% test)
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
+    X, y, test_size=0.3, random_state=42
 )
 
-# Feature scaling (StandardScaler)
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)
+# No scaling
+X_train_scaled = X_train.values
+X_test_scaled = X_test.values
 
-# Model: Lasso Regression with alpha=0.1
-model = Lasso(alpha=0.1)
+# Model: Ridge Regression with alpha=0.5
+model = Ridge(alpha=0.5)
 model.fit(X_train_scaled, y_train)
 
 # Predict
