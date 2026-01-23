@@ -35,7 +35,7 @@ jobs:
 
       - name: Run training script
         run: |
-          python scripts/train.py
+          python train.py
 
       - name: Extract R2 metric
         id: extract-metric
