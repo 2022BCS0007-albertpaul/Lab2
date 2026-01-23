@@ -1,12 +1,14 @@
-name: ML Train & Deploy Pipeline
+name: ML Train and Conditional Deploy
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
-permissions:
-  contents: write
-  actions: write
+env:
+  BEST_R2: ${{ vars.BEST_R2_SCORE }}
+  BEST_MSE: ${{ vars.BEST_MSE }}
 
 jobs:
   # =========================
@@ -16,11 +18,11 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
-      r2_score: ${{ steps.extract_metrics.outputs.r2 }}
-      mse: ${{ steps.extract_metrics.outputs.mse }}
+      current_r2: ${{ steps.extract-r2.outputs.r2 }}
+      current_mse: ${{ steps.extract-mse.outputs.mse }}
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python 3.11
@@ -28,28 +30,49 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Train Model
-        run: |
-          python train.py
+      - name: Create output directory
+        run: mkdir -p output
 
-      - name: Extract Metrics
-        id: extract_metrics
+      - name: Run training script
+        run: python train.py
+
+      - name: Extract R2 metric
+        id: extract-r2
         run: |
-          R2=$(python -c "import json; print(json.load(open('output/results.json'))['R2_Score'])")
-          MSE=$(python -c "import json; print(json.load(open('output/results.json'))['MSE'])")
+          R2=$(python -c "import json; print(json.load(open('output/results.json'))['r2_score'])")
           echo "r2=$R2" >> $GITHUB_OUTPUT
+
+      - name: Extract MSE metric
+        id: extract-mse
+        run: |
+          MSE=$(python -c "import json; print(json.load(open('output/results.json'))['mean_squared_error'])")
           echo "mse=$MSE" >> $GITHUB_OUTPUT
 
-      - name: Upload Model & Metrics
+      - name: Write job summary
+        run: |
+          echo "## Training Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Name:** Albert Sebastian" >> $GITHUB_STEP_SUMMARY
+          echo "**Roll Number:** 2022BCS0007" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Evaluation Metrics" >> $GITHUB_STEP_SUMMARY
+          cat output/results.json >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload trained model
         uses: actions/upload-artifact@v4
         with:
           name: trained-model
-          path: output/
+          path: output/model.pkl
+
+      - name: Upload metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrics
+          path: output/results.json
 
   # =========================
   # JOB 2: DEPLOY (CD)
@@ -59,57 +82,72 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Download Trained Model
-        uses: actions/download-artifact@v4
-        with:
-          name: trained-model
-          path: output/
-
-      - name: Verify Model Exists
-        run: ls -R output/
-
-      - name: Install bc (for float comparison)
-        run: sudo apt-get update && sudo apt-get install -y bc
-
-      - name: Compare Metrics
+      - name: Compare metrics with baseline
         id: compare
         run: |
-          CUR_R2=${{ needs.train.outputs.r2_score }}
-          CUR_MSE=${{ needs.train.outputs.mse }}
-          BEST_R2=${{ vars.BEST_R2_SCORE }}
-          BEST_MSE=${{ vars.BEST_MSE }}
+          current_r2=${{ needs.train.outputs.current_r2 }}
+          current_mse=${{ needs.train.outputs.current_mse }}
+          best_r2=${{ env.BEST_R2 }}
+          best_mse=${{ env.BEST_MSE }}
 
-          echo "Current R2: $CUR_R2 | Best R2: $BEST_R2"
-          echo "Current MSE: $CUR_MSE | Best MSE: $BEST_MSE"
+          echo "Current R2: $current_r2"
+          echo "Current MSE: $current_mse"
+          echo "Best R2: $best_r2"
+          echo "Best MSE: $best_mse"
 
-          if (( $(echo "$CUR_R2 <= $BEST_R2" | bc -l) )) || (( $(echo "$CUR_MSE >= $BEST_MSE" | bc -l) )); then
-            echo "2022BCS0007----Metric did not improve"
+          r2_check=$(echo "$current_r2 > $best_r2" | bc -l)
+          mse_check=$(echo "$current_mse < $best_mse" | bc -l)
+
+          if [ "$r2_check" -eq 1 ] && [ "$mse_check" -eq 1 ]; then
+            echo "Metrics improved. Deploying..."
+            echo "deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "Metrics did not improve. Stopping deployment."
             exit 0
           fi
 
-          echo "deploy=true" >> $GITHUB_OUTPUT
+      - name: Checkout repository
+        if: steps.compare.outputs.deploy == 'true'
+        uses: actions/checkout@v4
 
-      - name: Login to DockerHub
+      - name: Download trained model
+        if: steps.compare.outputs.deploy == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: trained-model
+          path: app/
+
+      - name: Log in to Docker Hub
         if: steps.compare.outputs.deploy == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build & Push Docker Image
+      - name: Build Docker image
         if: steps.compare.outputs.deploy == 'true'
         run: |
-          IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/ml-model:latest
-          docker build -t $IMAGE .
-          docker push $IMAGE
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/albertpaulbcs7:latest .
 
-      - name: Update Best Metrics
+      - name: Push Docker image
         if: steps.compare.outputs.deploy == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
-          gh variable set BEST_R2_SCORE --body "${{ needs.train.outputs.r2_score }}"
-          gh variable set BEST_MSE --body "${{ needs.train.outputs.mse }}"
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/albertpaulbcs7:latest
+
+      - name: Update BEST_R2 variable
+        if: steps.compare.outputs.deploy == 'true'
+        run: |
+          curl -X PATCH \
+            -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -d "{\"value\":\"${{ needs.train.outputs.current_r2 }}\"}" \
+            https://api.github.com/repos/${{ github.repository }}/actions/variables/BEST_R2
+
+      - name: Update BEST_MSE variable
+        if: steps.compare.outputs.deploy == 'true'
+        run: |
+          curl -X PATCH \
+            -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -d "{\"value\":\"${{ needs.train.outputs.current_mse }}\"}" \
+            https://api.github.com/repos/${{ github.repository }}/actions/variables/BEST_MSE
