@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main ]
 
+env:
+  BEST_R2: ${{ vars.BEST_R2 }}
+  BEST_MSE: ${{ vars.BEST_MSE }}
+
 jobs:
   # =========================
   # JOB 1: TRAIN (CI)
@@ -14,7 +18,8 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
-      current_r2: ${{ steps.extract-metric.outputs.r2 }}
+      current_r2: ${{ steps.extract-r2.outputs.r2 }}
+      current_mse: ${{ steps.extract-mse.outputs.mse }}
 
     steps:
       - name: Checkout repository
@@ -34,14 +39,19 @@ jobs:
         run: mkdir -p output
 
       - name: Run training script
-        run: |
-          python train.py
+        run: python train.py
 
       - name: Extract R2 metric
-        id: extract-metric
+        id: extract-r2
         run: |
           R2=$(python -c "import json; print(json.load(open('output/results.json'))['r2_score'])")
           echo "r2=$R2" >> $GITHUB_OUTPUT
+
+      - name: Extract MSE metric
+        id: extract-mse
+        run: |
+          MSE=$(python -c "import json; print(json.load(open('output/results.json'))['mean_squared_error'])")
+          echo "mse=$MSE" >> $GITHUB_OUTPUT
 
       - name: Write job summary
         run: |
@@ -75,15 +85,25 @@ jobs:
       - name: Compare metrics with baseline
         id: compare
         run: |
-          echo "Current R2: ${{ needs.train.outputs.current_r2 }}"
-          echo "Best R2: ${{ vars.BEST_R2 }}"
+          current_r2=${{ needs.train.outputs.current_r2 }}
+          current_mse=${{ needs.train.outputs.current_mse }}
+          best_r2=${{ env.BEST_R2 }}
+          best_mse=${{ env.BEST_MSE }}
 
-          if (( $(echo "${{ needs.train.outputs.current_r2 }} <= ${{ vars.BEST_R2 }}" | bc -l) )); then
-            echo "2022BCS0007 ---- Metric did not improve"
-            exit 0
-          else
-            echo "Metric improved"
+          echo "Current R2: $current_r2"
+          echo "Current MSE: $current_mse"
+          echo "Best R2: $best_r2"
+          echo "Best MSE: $best_mse"
+
+          r2_check=$(echo "$current_r2 > $best_r2" | bc -l)
+          mse_check=$(echo "$current_mse < $best_mse" | bc -l)
+
+          if [ "$r2_check" -eq 1 ] && [ "$mse_check" -eq 1 ]; then
+            echo "Metrics improved. Deploying..."
             echo "deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "Metrics did not improve. Stopping deployment."
+            exit 0
           fi
 
       - name: Checkout repository
@@ -118,7 +138,16 @@ jobs:
         if: steps.compare.outputs.deploy == 'true'
         run: |
           curl -X PATCH \
-            -H "Authorization: Bearer ${{ secrets.GH_PAT }}" \
+            -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/actions/variables/BEST_R2 \
-            -d "{\"name\":\"BEST_R2\",\"value\":\"${{ needs.train.outputs.current_r2 }}\"}"
+            -d "{\"value\":\"${{ needs.train.outputs.current_r2 }}\"}" \
+            https://api.github.com/repos/${{ github.repository }}/actions/variables/BEST_R2
+
+      - name: Update BEST_MSE variable
+        if: steps.compare.outputs.deploy == 'true'
+        run: |
+          curl -X PATCH \
+            -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -d "{\"value\":\"${{ needs.train.outputs.current_mse }}\"}" \
+            https://api.github.com/repos/${{ github.repository }}/actions/variables/BEST_MSE
